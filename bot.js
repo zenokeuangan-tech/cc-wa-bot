@@ -21,6 +21,16 @@ app.get('/qr-status', (req, res) => {
     });
 });
 
+// Endpoint baru untuk melakukan tes kirim pengingat tagihan secara manual
+app.get('/test-check', async (req, res) => {
+    try {
+        await checkAndSendReminders();
+        res.json({ status: 'success', message: 'Pengecekan dan pengiriman pengingat tagihan berhasil dijalankan!' });
+    } catch (err) {
+        res.status(500).json({ status: 'error', message: err.message });
+    }
+});
+
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -155,47 +165,64 @@ client.on('ready', () => {
     latestQR = '';
     console.log('🤖 Bot WhatsApp CC Tracker Sudah Siap & Terhubung!');
     startCronJob();
+    
+    // Jalankan pengecekan 1x secara otomatis saat bot baru saja terhubung
+    checkAndSendReminders();
 });
 
 client.initialize();
 
-function startCronJob() {
-    cron.schedule('0 8 * * *', async () => {
-        console.log('Mulai menjalankan pengecekan tagihan harian...');
-        try {
-            const usersSnapshot = await db.collection('artifacts').doc('cctracker-app').collection('users').get();
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+async function checkAndSendReminders() {
+    console.log('Mulai menjalankan pengecekan tagihan...');
+    try {
+        const usersSnapshot = await db.collection('artifacts').doc('cctracker-app').collection('users').get();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-            usersSnapshot.forEach(userDoc => {
-                const userId = userDoc.id;
-                db.collection('artifacts').doc('cctracker-app').collection('users').doc(userId).collection('data').doc('state').get()
-                    .then(stateDoc => {
-                        if (!stateDoc.exists) return;
-                        const userData = stateDoc.data();
-                        if (!userData.waNumber) return; 
-                        
-                        const waNumber = userData.waNumber + '@c.us';
-                        const activeBills = userData.bills ? userData.bills.filter(b => !b.isPaid) : [];
-                        
-                        activeBills.forEach(bill => {
-                            const dueDate = new Date(bill.dueDate);
-                            const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-                            const card = userData.cards ? userData.cards.find(c => c.id === bill.cardId) : null;
-                            const bankName = card ? card.bank : 'Kartu Kredit';
-                            const rp = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(bill.amount);
+        usersSnapshot.forEach(userDoc => {
+            const userId = userDoc.id;
+            db.collection('artifacts').doc('cctracker-app').collection('users').doc(userId).collection('data').doc('state').get()
+                .then(stateDoc => {
+                    if (!stateDoc.exists) return;
+                    const userData = stateDoc.data();
+                    if (!userData.waNumber) return; 
+                    
+                    // Clean & Format Nomor WhatsApp (memastikan format 62xxx)
+                    let cleanNumber = userData.waNumber.toString().replace(/\D/g, '');
+                    if (cleanNumber.startsWith('0')) {
+                        cleanNumber = '62' + cleanNumber.slice(1);
+                    }
+                    const waNumber = cleanNumber + '@c.us';
 
-                            if (diffDays === 5) {
-                                client.sendMessage(waNumber, `🚨 *PENGINGAT TAGIHAN H-5* 🚨\n\nHalo! Tagihan *${bankName}* sebesar *${rp}* akan jatuh tempo dalam 5 hari (${bill.dueDate}).\n\n_Pesan otomatis dari CC Tracker_`);
-                            }
-                            if (diffDays === 0) {
-                                client.sendMessage(waNumber, `⚠️ *HARI TERAKHIR PEMBAYARAN* ⚠️\n\nHari ini adalah batas akhir pembayaran *${bankName}* sebesar *${rp}*.\n\n_Pesan otomatis dari CC Tracker_`);
-                            }
-                        });
+                    const activeBills = userData.bills ? userData.bills.filter(b => !b.isPaid) : [];
+                    
+                    activeBills.forEach(bill => {
+                        const dueDate = new Date(bill.dueDate);
+                        dueDate.setHours(0, 0, 0, 0);
+                        const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+                        const card = userData.cards ? userData.cards.find(c => c.id === bill.cardId) : null;
+                        const bankName = card ? card.bank : 'Kartu Kredit';
+                        const rp = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(bill.amount);
+
+                        // Kirim pengingat jika H-5, H-4, H-3, H-2, H-1, atau Hari H (0)
+                        if (diffDays === 5) {
+                            client.sendMessage(waNumber, `🚨 *PENGINGAT TAGIHAN H-5* 🚨\n\nHalo! Tagihan *${bankName}* sebesar *${rp}* akan jatuh tempo dalam 5 hari (${bill.dueDate}).\n\n_Pesan otomatis dari CC Tracker_`);
+                        } else if (diffDays > 0 && diffDays < 5) {
+                            client.sendMessage(waNumber, `⚠️ *PENGINGAT TAGIHAN H-${diffDays}* ⚠️\n\nHalo! Tagihan *${bankName}* sebesar *${rp}* akan jatuh tempo dalam ${diffDays} hari lagi (${bill.dueDate}).\n\n_Pesan otomatis dari CC Tracker_`);
+                        } else if (diffDays === 0) {
+                            client.sendMessage(waNumber, `⚠️ *HARI TERAKHIR PEMBAYARAN* ⚠️\n\nHari ini adalah batas akhir pembayaran *${bankName}* sebesar *${rp}*.\n\n_Pesan otomatis dari CC Tracker_`);
+                        }
                     });
-            });
-        } catch (error) {
-            console.error('Error saat mengecek tagihan:', error);
-        }
+                });
+        });
+    } catch (error) {
+        console.error('Error saat mengecek tagihan:', error);
+    }
+}
+
+function startCronJob() {
+    // Jalankan setiap jam 08:00 Pagi Waktu Indonesia Barat (Asia/Jakarta)
+    cron.schedule('0 8 * * *', checkAndSendReminders, {
+        timezone: "Asia/Jakarta"
     });
 }
