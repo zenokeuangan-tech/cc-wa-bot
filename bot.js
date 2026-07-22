@@ -13,39 +13,85 @@ const port = process.env.PORT || 10000;
 let latestQR = '';
 let isConnected = false;
 
-// Halaman Web untuk melihat QR Code langsung dari Browser
-app.get('/', (req, res) => {
-    if (isConnected) {
-        res.send(`
-            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-                <h1 style="color: #16a34a;">✅ Bot WhatsApp Terhubung & Aktif!</h1>
-                <p>Bot CC Tracker sedang berjalan 24 jam di Cloud.</p>
-            </div>
-        `);
-    } else if (latestQR) {
-        const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(latestQR)}`;
-        res.send(`
-            <div style="font-family: sans-serif; text-align: center; padding: 40px;">
-                <h1>📱 Scan QR Code WhatsApp</h1>
-                <p>Buka WhatsApp di HP > Perangkat Tertaut > Scan QR di bawah ini:</p>
-                <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 4px solid #3b82f6; border-radius: 12px; padding: 10px; margin-top: 10px;" />
-                <p style="color: #666; font-size: 14px; margin-top: 15px;">Halaman ini akan otomatis diperbarui setiap 15 detik.</p>
-                <script>setTimeout(() => location.reload(), 15000);</script>
-            </div>
-        `);
-    } else {
-        res.send(`
-            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-                <h2>⏳ Menyiapkan Bot WhatsApp...</h2>
-                <p>Server sedang membuka WhatsApp Web di latar belakang (butuh waktu sekitar 30-60 detik).</p>
-                <p>Halaman ini akan otomatis memuat ulang...</p>
-                <script>setTimeout(() => location.reload(), 10000);</script>
-            </div>
-        `);
-    }
+// API Endpoint untuk cek status QR via AJAX (tanpa reload halaman)
+app.get('/qr-status', (req, res) => {
+    res.json({
+        isConnected: isConnected,
+        qr: latestQR
+    });
 });
 
-app.listen(port, () => {
+app.get('/', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Scan QR WhatsApp - CC Tracker</title>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f3f4f6; color: #1f2937; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }
+                .card { background: #ffffff; padding: 35px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); max-width: 420px; width: 90%; }
+                h1 { font-size: 22px; margin-bottom: 8px; color: #111827; }
+                p { font-size: 14px; color: #6b7280; line-height: 1.5; margin-bottom: 20px; }
+                /* Area Quiet Zone Putih Bersih untuk Kamera */
+                .qr-container { background: #ffffff; padding: 20px; border-radius: 16px; border: 2px solid #e5e7eb; display: inline-block; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+                .qr-container img { width: 280px; height: 280px; display: block; border: none; }
+                .status-badge { display: inline-flex; align-items: center; gap: 8px; background: #dcfce7; color: #15803d; font-weight: 600; padding: 8px 16px; border-radius: 9999px; font-size: 14px; margin-top: 15px; }
+                .loading-spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div id="content">
+                    <h2>⏳ Menyiapkan WhatsApp Web...</h2>
+                    <div class="loading-spinner"></div>
+                    <p>Mohon tunggu beberapa detik, browser cloud sedang memuat WhatsApp.</p>
+                </div>
+            </div>
+
+            <script>
+                let currentQR = '';
+                async function checkStatus() {
+                    try {
+                        const response = await fetch('/qr-status');
+                        const data = await response.json();
+                        const contentDiv = document.getElementById('content');
+
+                        if (data.isConnected) {
+                            contentDiv.innerHTML = \`
+                                <h1 style="color: #16a34a;">✅ WhatsApp Terhubung!</h1>
+                                <p>Bot CC Tracker sudah aktif 24 jam di Cloud dan siap mengirim pengingat tagihan.</p>
+                                <div class="status-badge">● Bot Berjalan Normal</div>
+                            \`;
+                        } else if (data.qr) {
+                            if (currentQR !== data.qr) {
+                                currentQR = data.qr;
+                                const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=2&data=' + encodeURIComponent(data.qr);
+                                contentDiv.innerHTML = \`
+                                    <h1>📱 Scan QR Code WhatsApp</h1>
+                                    <p>Buka WhatsApp di HP &gt; <b>Perangkat Tertaut</b> &gt; <b>Tautkan Perangkat</b>:</p>
+                                    <div class="qr-container">
+                                        <img src="\${qrUrl}" alt="WhatsApp QR Code" />
+                                    </div>
+                                    <p style="font-size: 12px; color: #9ca3af; margin-top: 15px;">QR Code ini diperbarui secara otomatis secara realtime.</p>
+                                \`;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error fetching QR status:', e);
+                    }
+                }
+                setInterval(checkStatus, 2000);
+                checkStatus();
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+app.listen(port, '0.0.0.0', () => {
     console.log(`🌐 Server Web Mini berjalan di port ${port}`);
 });
 
@@ -55,7 +101,6 @@ initializeApp({
 });
 const db = getFirestore();
 
-// Fungsi untuk mencari jalur eksekusi Chrome lokal secara dinamis
 function findChromeExecutable() {
     const puppeteerCacheDir = path.join(__dirname, '.cache', 'puppeteer', 'chrome');
     if (!fs.existsSync(puppeteerCacheDir)) return null;
@@ -83,7 +128,15 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-features=Translate',
+            '--disable-sync',
+            '--metrics-recording-only',
+            '--no-default-browser-check',
+            '--single-process' // Sangat penting: Menjalankan Chrome dalam 1 proses untuk menghemat RAM < 512MB
         ] 
     }
 });
@@ -92,7 +145,7 @@ client.on('qr', (qr) => {
     latestQR = qr;
     isConnected = false;
     console.log('\n=========================================');
-    console.log('QR CODE BARU SIAP! Buka URL Web Service Anda di browser untuk men-scan.');
+    console.log('QR CODE BARU SIAP! Buka URL Web Service Render Anda di browser.');
     console.log('=========================================\n');
     qrcode.generate(qr, { small: true });
 });
