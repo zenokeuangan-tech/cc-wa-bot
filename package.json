@@ -4,7 +4,26 @@
   "description": "",
   "main": "bot.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "name": "cc-wa-bot",
+    "version": "1.0.0",
+    "description": "",
+    "main": "bot.js",
+    "scripts": {
+      "test": "echo "Error: no test specified" && exit 1",
+      "start": "node bot.js",
+      "render-postbuild": "npx puppeteer browsers install chrome"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+      "express": "^4.21.2",
+      "firebase-admin": "^13.1.0",
+      "node-cron": "^3.0.3",
+      "qrcode-terminal": "^0.12.0",
+      "whatsapp-web.js": "^1.26.0",
+      "puppeteer": "^24.1.1"
+    }
   },
   "keywords": [],
   "author": "",
